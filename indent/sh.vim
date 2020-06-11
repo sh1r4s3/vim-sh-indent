@@ -84,10 +84,16 @@ function! GetShIndent()
 
   " Check contents of previous lines
   " should not apply to e.g. commented lines
-  if line =~ '^\s*\%(if\|then\|do\|else\|elif\|case\|while\|until\|for\|select\|foreach\)\>' ||
-        \  (&ft is# 'zsh' && line =~ '^\s*\<\%(if\|then\|do\|else\|elif\|case\|while\|until\|for\|select\|foreach\)\>')
-    if !s:is_end_expression(line)
+  if !s:is_end_expression(line) && !s:is_continuation_line(line) &&
+        \ (line =~ '^\s*\%(if\|then\|do\|else\|elif\|case\|while\|until\|for\|select\|foreach\)\>' ||
+        \  (&ft is# 'zsh' && line =~ '^\s*\<\%(if\|then\|do\|else\|elif\|case\|while\|until\|for\|select\|foreach\)\>'))
       let ind += s:indent_value('default')
+  elseif s:is_end_expression(line)
+    if pnum != 0
+      let i = s:find_begin_expression(lnum)
+      if i > 1 && s:is_continuation_line(getline(i - 1))
+        let ind = indent(i - 1)
+      endif
     endif
   elseif s:is_case_label(line, pnum)
     if !s:is_case_ended(line)
@@ -104,7 +110,8 @@ function! GetShIndent()
   " end of array
   elseif curline =~ '^\s*)$'
       let ind -= s:indent_value('continuation-line')
-  elseif s:is_continuation_line(line)
+  elseif s:is_continuation_line(line) && 
+        \ line !~ '\s*\<\%(fi\|esac\|done\|end\)\>\s*|\s*\%(#.*\)\=$'
     if pnum == 0 || !s:is_continuation_line(pline)
       let ind += s:indent_value('continuation-line')
     endif
@@ -115,11 +122,18 @@ function! GetShIndent()
         \ !s:end_block(curline) &&
         \ !s:is_end_expression(curline)
     " only add indent, if line and pline is in the same block
-    let i = v:lnum
-    let ind2 = indent(s:find_continued_lnum(pnum))
-    while !s:is_empty(getline(i)) && i > pnum
-      let i -= 1
-    endw
+    if pline =~ '\s*\<\%(fi\|esac\|done\|end\)\>\s*|\s*\%(#.*\)\=$'
+      let i = s:find_begin_expression(lnum)
+      if i > 1 && s:is_continuation_line(getline(i - 1))
+        let ind2 = indent(i - 1)
+      endif
+    else
+      let ind2 = indent(s:find_continued_lnum(pnum))
+      let i = v:lnum
+      while !s:is_empty(getline(i)) && i > pnum
+        let i -= 1
+      endw
+    endif
     if i == pnum && s:is_continuation_line(line)
       let ind += ind2
     else
@@ -293,6 +307,18 @@ endfunction
 
 function! s:is_end_expression(line)
   return a:line =~ '\<\%(fi\|esac\|done\|end\)\>\s*\%(#.*\)\=$'
+endfunction
+
+function! s:is_begin_expression(line)
+  return a:line =~ '^\s*\<\%(if\|case\|while\|until\|for\|select\|foreach\)\>'
+endfunction
+
+function! s:find_begin_expression(lnum)
+  let i = a:lnum
+  while i > 1 && !s:is_begin_expression(getline(i))
+    let i -= 1
+  endwhile
+  return i
 endfunction
 
 function! s:is_bash()
